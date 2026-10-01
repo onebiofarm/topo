@@ -146,7 +146,20 @@ select { min-height: 40px; padding: 8px; background: var(--surface-2); border: 1
 .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); margin-top: 6px; }
 .legend-swatch { flex: none; width: 18px; height: 14px; border-radius: 3px; border: 1px solid var(--border); }
 
-.map-wrap { min-height: 560px; min-width: 0; }
+.map-wrap { position: relative; min-height: 560px; min-width: 0; }
+#zoom-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  background: var(--brand);
+  color: var(--on-brand);
+  font-size: 13px;
+  border-radius: 999px;
+  white-space: nowrap;
+  pointer-events: none;
+}
 #map { height: 100%; min-height: 560px; border: 1px solid var(--border); border-radius: 12px; z-index: 0; }
 #map.pin-mode { cursor: crosshair; }
 
@@ -162,7 +175,6 @@ select { min-height: 40px; padding: 8px; background: var(--surface-2); border: 1
   white-space: nowrap;
   pointer-events: none;
 }
-.labels-hidden .cell-label { display: none; }
 .flood-img { image-rendering: pixelated; }
 .ext-icon {
   display: grid;
@@ -214,6 +226,9 @@ footer { margin: 0 16px 24px; font-size: 12.5px; color: var(--ink-2); max-width:
       <button type="button" id="gps-btn">ตำแหน่งของฉัน</button>
       <label class="reach" for="reach-select">ระยะตาราง
         <select id="reach-select"></select>
+      </label>
+      <label class="reach" for="step-select">ขนาดช่อง
+        <select id="step-select"></select>
       </label>
     </div>
   </div>
@@ -302,6 +317,7 @@ footer { margin: 0 16px 24px; font-size: 12.5px; color: var(--ink-2); max-width:
 
   <section class="map-wrap">
     <div id="map"></div>
+    <p id="zoom-hint" hidden>ซูมเข้าเพื่อดูตัวเลขในช่อง</p>
   </section>
 </main>
 
@@ -322,14 +338,33 @@ footer { margin: 0 16px 24px; font-size: 12.5px; color: var(--ink-2); max-width:
 
 // ---------- constants ----------
 
-const N = 11;                // labelled grid points per side
-const MID = (N - 1) / 2;
-// Reach = metres from the pin to the outermost grid points. The cell size is always
-// reach / 5, so every reach gives an 11 x 11 table: 121 numbers stay readable on a
-// phone, while extremes and the flood model keep using the full-detail data.
+// Reach = metres from the pin to the outermost grid points.
 const REACH_OPTIONS = [500, 1000, 2000, 3000, 4000, 5000];
-const stepFor = (half) => half / MID;
-const POINT_STEP = 100;      // at this cell size a number is the grid point itself
+// Cell sizes on offer. 25 m is the floor: the source data holds one value per
+// 30 m, so anything smaller would only be interpolation.
+const STEP_CHOICES = [25, 50, 100, 200, 250, 500, 1000];
+const MIN_GRID = 5;          // cells per side
+const MAX_GRID = 41;         // more than this is too slow on a phone
+const gridSize = (half, step) => 2 * half / step + 1;
+// Recommended cell size: an 11 x 11 table, readable on a phone at any reach.
+const defaultStep = (half) => half / 5;
+const POINT_STEP = 100;      // up to this cell size a number is the grid point itself
+
+function stepOptions(half) {
+  const steps = STEP_CHOICES.filter((step) => {
+    const n = gridSize(half, step);
+    return half % step === 0 && n >= MIN_GRID && n <= MAX_GRID;
+  });
+  if (!steps.includes(defaultStep(half))) steps.push(defaultStep(half));
+  return steps.sort((a, b) => a - b);
+}
+
+// Open-Meteo is 90 m data fetched 100 points per call: small cells or big grids
+// would mean hundreds of calls for no extra detail, so fall back to the default.
+function usableStep(source, half, step) {
+  if (source !== 'openmeteo') return step;
+  return step >= 100 && gridSize(half, step) <= 21 ? step : defaultStep(half);
+}
 const DEPTHS_CM = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
 const FLOOD_SCALE_M = 1;     // water depth that maps to the darkest blue
 
@@ -341,7 +376,7 @@ const LOCAL_SERVER = location.protocol === 'http:' && /^(localhost|127\.0\.0\.1)
 const SOURCES = {
   glo30: {
     name: 'Copernicus GLO-30',
-    fineStep: () => 25,
+    fineStep: (step) => Math.min(25, step / 2),
     decimals: 1,
     note: 'ข้อมูลดาวเทียม ช่องละ 30 ม. ค่าทศนิยมจริง อ้างอิงระดับน้ำทะเลปานกลาง (EGM2008)',
   },
@@ -371,6 +406,7 @@ const state = {
   center: null,        // {lat, lng, note?}
   source: 'glo30',
   half: REACH_OPTIONS[0], // chosen reach; the analysed one lives in data.half
+  step: defaultStep(REACH_OPTIONS[0]), // chosen cell size; analysed one in data.step
   data: null,          // result of the last analysis
   labelMode: 'elev',   // elev | diff | depth
   floodMode: 'off',    // off | dir | level
@@ -638,13 +674,13 @@ function trackExtremes(extremes, p) {
 }
 
 // Fine-grid samples that stand for each labelled cell: the grid point alone for
-// 100 m cells, every sample inside the cell for larger ones.
-function cellSamples(fine, step) {
+// cells up to 100 m, every sample inside the cell for larger ones.
+function cellSamples(fine, step, n) {
   const k = step / fine.step;
-  const h = step === POINT_STEP ? 0 : k / 2;
+  const h = step <= POINT_STEP ? 0 : k / 2;
   const cells = [];
-  for (let r = 0; r < N; r++) {
-    for (let c = 0; c < N; c++) {
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
       const fr = r * k + k / 2, fc = c * k + k / 2;
       const samples = [];
       for (let dr = -h; dr <= h; dr++) {
@@ -661,8 +697,9 @@ function cellSamples(fine, step) {
 async function analyze() {
   const runId = ++state.runId;
   const center = state.center;
-  const half = state.half, step = stepFor(half);
+  const half = state.half, wantedStep = state.step;
   let source = state.source;
+  let step = usableStep(source, half, wantedStep);
   setStatus(`กำลังดึงข้อมูลความสูงจาก ${SOURCES[source].name}…`);
   $('csv-btn').disabled = true;
 
@@ -673,12 +710,15 @@ async function analyze() {
     if (source !== 'glo30') throw err;
     console.warn('GLO-30 failed, falling back to Open-Meteo', err);
     source = 'openmeteo';
+    step = usableStep(source, half, wantedStep);
     fine = await loadOpenMeteo(center, half, step);
     fallbackNote = ' (โหลด Copernicus GLO-30 ไม่ได้ จึงใช้ Open-Meteo แทน)';
   }
   if (runId !== state.runId) return; // a newer request replaced this one
+  if (step !== wantedStep) fallbackNote += ` · Open-Meteo หยาบเกินกว่าช่องขนาดที่เลือก จึงใช้ช่องละ ${fmtDist(step)}`;
 
-  const cells = cellSamples(fine, step);
+  const n = gridSize(half, step), mid = (n - 1) / 2;
+  const cells = cellSamples(fine, step, n);
   const grid = Float32Array.from(cells, (samples) => percentile(samples.map((i) => fine.data[i]), 0.5));
   for (let i = 0; i < fine.data.length; i++) {
     const elev = fine.data[i];
@@ -686,8 +726,8 @@ async function analyze() {
   }
 
   state.data = {
-    center, source, half, step, fine, grid, cells,
-    centerElev: grid[MID * N + MID],
+    center, source, half, step, n, mid, fine, grid, cells,
+    centerElev: grid[mid * n + mid],
     min: fine.extremes.min,
     max: fine.extremes.max,
     fetchedAt: new Date(),
@@ -782,7 +822,7 @@ function computeFlood() {
 
 // Depth in metres of a labelled cell (0 when dry).
 function gridDepth(r, c) {
-  return state.flood ? state.flood.cellDepth[r * N + c] : 0;
+  return state.flood ? state.flood.cellDepth[r * state.data.n + c] : 0;
 }
 
 // ---------- colour ----------
@@ -833,7 +873,7 @@ function fmtDiff(v) {
 
 function cellText(r, c) {
   const d = state.data;
-  const elev = d.grid[r * N + c];
+  const elev = d.grid[r * d.n + c];
   if (state.labelMode === 'diff') return fmtDiff(elev - d.centerElev);
   if (state.labelMode === 'depth') {
     const depth = gridDepth(r, c);
@@ -878,34 +918,27 @@ const layers = {
   markers: L.layerGroup().addTo(map),
   flood: null,
   rects: [],
-  labelEls: [],
 };
+// One canvas for all cells: a fine grid has up to 1,681 of them.
+const cellRenderer = L.canvas({ padding: 0.5 });
 
 function buildMapLayers() {
   const d = state.data;
   layers.cells.clearLayers();
-  layers.labels.clearLayers();
   layers.markers.clearLayers();
   layers.rects = [];
-  layers.labelEls = [];
 
-  for (let r = 0; r < N; r++) {
-    for (let c = 0; c < N; c++) {
+  for (let r = 0; r < d.n; r++) {
+    for (let c = 0; c < d.n; c++) {
       const east = -d.half + c * d.step, north = d.half - r * d.step;
       const sw = offsetPoint(d.center, east - d.step / 2, north - d.step / 2);
       const ne = offsetPoint(d.center, east + d.step / 2, north + d.step / 2);
-      const rect = L.rectangle([[sw.lat, sw.lng], [ne.lat, ne.lng]], { weight: 1, color: '#22252c', opacity: 0.25 });
+      const rect = L.rectangle([[sw.lat, sw.lng], [ne.lat, ne.lng]], {
+        renderer: cellRenderer, weight: 1, color: '#22252c', opacity: 0.25,
+      });
       rect.bindTooltip(() => cellTooltip(r, c), { sticky: true });
       rect.addTo(layers.cells);
       layers.rects.push(rect);
-
-      const p = offsetPoint(d.center, east, north);
-      const label = L.marker([p.lat, p.lng], {
-        interactive: false,
-        keyboard: false,
-        icon: L.divIcon({ className: 'cell-label', iconSize: [64, 20] }),
-      }).addTo(layers.labels);
-      layers.labelEls.push(label.getElement());
     }
   }
 
@@ -920,7 +953,6 @@ function buildMapLayers() {
   const sw = offsetPoint(d.center, -d.fine.ext, -d.fine.ext);
   const ne = offsetPoint(d.center, d.fine.ext, d.fine.ext);
   map.fitBounds([[sw.lat, sw.lng], [ne.lat, ne.lng]], { padding: [10, 10] });
-  updateLabelSize();
 }
 
 function addExtremeMarker(p, symbol, name) {
@@ -934,10 +966,10 @@ function addExtremeMarker(p, symbol, name) {
 
 function cellTooltip(r, c) {
   const d = state.data;
-  const elev = d.grid[r * N + c];
+  const elev = d.grid[r * d.n + c];
   const p = offsetPoint(d.center, -d.half + c * d.step, d.half - r * d.step);
   const lines = [
-    `<strong>${fmtElev(elev)} ม.รทก.</strong>${d.step === POINT_STEP ? '' : ' (ค่ากลางของช่อง)'}`,
+    `<strong>${fmtElev(elev)} ม.รทก.</strong>${d.step <= POINT_STEP ? '' : ' (ค่ากลางของช่อง)'}`,
     `ต่างจากจุดปัก ${fmtDiff(elev - d.centerElev)} ม.`,
   ];
   if (state.flood) {
@@ -948,17 +980,35 @@ function cellTooltip(r, c) {
   return lines.join('<br>');
 }
 
-// Scale the numbers with the on-screen cell size; hide them when cells get tiny.
-function updateLabelSize() {
-  if (!state.data) return;
-  const a = map.latLngToLayerPoint(offsetPoint(state.data.center, 0, 0));
-  const b = map.latLngToLayerPoint(offsetPoint(state.data.center, state.data.step, 0));
+const LABEL_MIN_PX = 26; // narrower cells cannot hold a readable number
+
+// Numbers are drawn only for cells inside the view, and only once a cell is wide
+// enough to hold one: zoom in on a fine grid to read it. Text scales with the cell.
+function renderLabels() {
+  layers.labels.clearLayers();
+  const d = state.data;
+  if (!d) return;
+  const a = map.latLngToLayerPoint(offsetPoint(d.center, 0, 0));
+  const b = map.latLngToLayerPoint(offsetPoint(d.center, d.step, 0));
   const cellPx = Math.abs(b.x - a.x);
-  const container = map.getContainer();
-  container.style.setProperty('--label-size', clamp(cellPx * 0.3, 9, 15) + 'px');
-  container.classList.toggle('labels-hidden', cellPx < 26);
+  $('zoom-hint').hidden = cellPx >= LABEL_MIN_PX;
+  if (cellPx < LABEL_MIN_PX) return;
+  map.getContainer().style.setProperty('--label-size', clamp(cellPx * 0.3, 9, 15) + 'px');
+
+  const view = map.getBounds().pad(0.1);
+  for (let r = 0; r < d.n; r++) {
+    for (let c = 0; c < d.n; c++) {
+      const p = offsetPoint(d.center, -d.half + c * d.step, d.half - r * d.step);
+      if (!view.contains([p.lat, p.lng])) continue;
+      L.marker([p.lat, p.lng], {
+        interactive: false,
+        keyboard: false,
+        icon: L.divIcon({ className: 'cell-label', iconSize: [64, 20], html: cellText(r, c) }),
+      }).addTo(layers.labels);
+    }
+  }
 }
-map.on('zoomend', updateLabelSize);
+map.on('moveend', renderLabels);
 
 function renderMap() {
   const d = state.data;
@@ -968,7 +1018,7 @@ function renderMap() {
       ? { fillOpacity: 0 }
       : { fillColor: rgbCss(elevationRgb(d.grid[i])), fillOpacity: 0.6 });
   });
-  layers.labelEls.forEach((el, i) => { el.textContent = cellText(Math.floor(i / N), i % N); });
+  renderLabels();
 
   if (layers.flood) { map.removeLayer(layers.flood); layers.flood = null; }
   if (flooding) {
@@ -1002,7 +1052,7 @@ function renderSummary() {
   const f = state.flood;
   $('flood-tiles').hidden = !f;
   if (f) {
-    const centerDepth = gridDepth(MID, MID);
+    const centerDepth = gridDepth(d.mid, d.mid);
     $('f-level').textContent = f.level.toFixed(2) + ' ม.';
     $('f-area').textContent = Math.round(f.wetShare * 100) + '%';
     $('f-center').textContent = centerDepth > 0 ? Math.round(centerDepth * 100) + ' ซม.' : 'น้ำไม่ถึง';
@@ -1039,16 +1089,16 @@ function renderTable() {
   $('table-title').textContent = titles[state.labelMode];
 
   $('table-hint').textContent = 'แถวบน = ทิศเหนือ · หัวตาราง = ระยะจากจุดปัก (เมตร) · ช่องกรอบหนา = จุดปัก'
-    + (d.step === POINT_STEP ? '' : ` · ตัวเลข = ค่ากลางของความสูงทั้งช่อง ${fmtDist(d.step)}`);
+    + (d.step <= POINT_STEP ? '' : ` · ตัวเลข = ค่ากลางของความสูงทั้งช่อง ${fmtDist(d.step)}`);
 
   const axis = (v, neg, pos) => (v === 0 ? '0' : `${v < 0 ? neg : pos} ${Math.abs(v)}`);
   let html = '<thead><tr><th></th>';
-  for (let c = 0; c < N; c++) html += `<th scope="col">${axis(-d.half + c * d.step, 'ตก', 'ออก')}</th>`;
+  for (let c = 0; c < d.n; c++) html += `<th scope="col">${axis(-d.half + c * d.step, 'ตก', 'ออก')}</th>`;
   html += '</tr></thead><tbody>';
-  for (let r = 0; r < N; r++) {
+  for (let r = 0; r < d.n; r++) {
     html += `<tr><th scope="row">${axis(d.half - r * d.step, 'ใต้', 'เหนือ')}</th>`;
-    for (let c = 0; c < N; c++) {
-      const elev = d.grid[r * N + c];
+    for (let c = 0; c < d.n; c++) {
+      const elev = d.grid[r * d.n + c];
       const depth = gridDepth(r, c);
       let style = '';
       if (!state.flood) {
@@ -1058,7 +1108,7 @@ function renderTable() {
         const rgb = depthRgb(depth);
         style = `background:${rgbCss(rgb)};color:${inkFor(rgb)}`;
       }
-      const cls = r === MID && c === MID ? ' class="center-cell"' : '';
+      const cls = r === d.mid && c === d.mid ? ' class="center-cell"' : '';
       html += `<td${cls} style="${style}">${cellText(r, c)}</td>`;
     }
     html += '</tr>';
@@ -1089,7 +1139,7 @@ function buildCsv() {
     ['แหล่งข้อมูล', SOURCES[d.source].name],
     ['ระยะจากจุดปัก (ม.)', d.half],
     ['ขนาดช่อง (ม.)', d.step],
-    ['ตัวเลขแต่ละช่อง', d.step === POINT_STEP ? 'ความสูง ณ จุดกลางช่อง' : 'ค่ากลางของความสูงทั้งช่อง'],
+    ['ตัวเลขแต่ละช่อง', d.step <= POINT_STEP ? 'ความสูง ณ จุดกลางช่อง' : 'ค่ากลางของความสูงทั้งช่อง'],
     ['วันที่ดึงข้อมูล', d.fetchedAt.toLocaleString('th-TH')],
     ['ความสูงจุดปัก (ม.รทก.)', fmtElev(d.centerElev)],
     ['จุดต่ำสุด (ม.รทก., lat, lng)', fmtElev(d.min.elev), d.min.lat.toFixed(6), d.min.lng.toFixed(6)],
@@ -1104,11 +1154,11 @@ function buildCsv() {
 
   rows.push([], ['ตารางความสูง (ม.รทก.) แถวบน = ทิศเหนือ, หัวตาราง = ระยะจากจุดปัก (ม.) ตะวันออกเป็นบวก']);
   const header = ['เหนือ(+)/ใต้(-) \\ ออก(+)/ตก(-)'];
-  for (let c = 0; c < N; c++) header.push(-d.half + c * d.step);
+  for (let c = 0; c < d.n; c++) header.push(-d.half + c * d.step);
   rows.push(header);
-  for (let r = 0; r < N; r++) {
+  for (let r = 0; r < d.n; r++) {
     const row = [d.half - r * d.step];
-    for (let c = 0; c < N; c++) row.push(fmtElev(d.grid[r * N + c]));
+    for (let c = 0; c < d.n; c++) row.push(fmtElev(d.grid[r * d.n + c]));
     rows.push(row);
   }
 
@@ -1116,11 +1166,11 @@ function buildCsv() {
   const listHeader = ['ระยะตะวันออก (ม.)', 'ระยะเหนือ (ม.)', 'lat', 'lng', 'ความสูง (ม.รทก.)', 'ต่างจากจุดปัก (ม.)'];
   if (f) listHeader.push('น้ำลึก (ซม.)');
   rows.push(listHeader);
-  for (let r = 0; r < N; r++) {
-    for (let c = 0; c < N; c++) {
+  for (let r = 0; r < d.n; r++) {
+    for (let c = 0; c < d.n; c++) {
       const east = -d.half + c * d.step, north = d.half - r * d.step;
       const p = offsetPoint(d.center, east, north);
-      const elev = d.grid[r * N + c];
+      const elev = d.grid[r * d.n + c];
       const row = [east, north, p.lat.toFixed(6), p.lng.toFixed(6), fmtElev(elev), fmtDiff(elev - d.centerElev)];
       if (f) row.push(Math.round(gridDepth(r, c) * 100));
       rows.push(row);
@@ -1263,18 +1313,47 @@ $('source-select').addEventListener('change', (event) => {
 
 for (const half of REACH_OPTIONS) {
   const side = 2 * half / 1000;
-  $('reach-select').add(new Option(`${fmtDist(half)} รอบจุด · ช่องละ ${fmtDist(stepFor(half))} (พื้นที่ ${side}×${side} กม.)`, half));
+  $('reach-select').add(new Option(`${fmtDist(half)} รอบจุด (พื้นที่ ${side}×${side} กม.)`, half));
 }
-try {
-  const saved = +localStorage.getItem('topomap-reach');
-  if (REACH_OPTIONS.includes(saved)) state.half = saved;
-} catch { /* storage unavailable */ }
-$('reach-select').value = state.half;
-$('reach-select').addEventListener('change', (event) => {
-  state.half = +event.target.value;
+
+// Cell sizes depend on the reach; keep the chosen one when it still fits.
+function fillStepOptions() {
+  const select = $('step-select');
+  const steps = stepOptions(state.half);
+  if (!steps.includes(state.step)) state.step = defaultStep(state.half);
+  select.replaceChildren(...steps.map((step) => {
+    const n = gridSize(state.half, step);
+    const tag = step === defaultStep(state.half) ? ' – แนะนำ' : '';
+    return new Option(`${fmtDist(step)} (${n}×${n} ช่อง)${tag}`, step);
+  }));
+  select.value = state.step;
+}
+
+function saveGridChoice() {
   try {
     localStorage.setItem('topomap-reach', state.half);
+    localStorage.setItem('topomap-step', state.step);
   } catch { /* storage unavailable */ }
+}
+
+try {
+  const savedHalf = +localStorage.getItem('topomap-reach');
+  if (REACH_OPTIONS.includes(savedHalf)) state.half = savedHalf;
+  state.step = +localStorage.getItem('topomap-step'); // validated by fillStepOptions
+} catch { /* storage unavailable */ }
+$('reach-select').value = state.half;
+fillStepOptions();
+
+$('reach-select').addEventListener('change', (event) => {
+  state.half = +event.target.value;
+  state.step = defaultStep(state.half);
+  fillStepOptions();
+  saveGridChoice();
+  if (state.center) setCenter(state.center);
+});
+$('step-select').addEventListener('change', (event) => {
+  state.step = +event.target.value;
+  saveGridChoice();
   if (state.center) setCenter(state.center);
 });
 
