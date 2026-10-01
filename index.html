@@ -1,0 +1,1292 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TopoMap – One Bio.farm</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600&family=Prompt:wght@600;700&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+/* Palette taken from the One Bio.farm logo: navy mark, charcoal ink, cream ground. */
+:root {
+  --bg: #f4f2ea;
+  --surface: #ffffff;
+  --surface-2: #eef1f8;
+  --border: #d5dae6;
+  --ink: #22252c;
+  --ink-2: #596075;
+  --brand: #2f4e87;
+  --brand-text: #2f4e87;
+  --on-brand: #ffffff;
+  --critical: #b83a2e;
+  --font-display: "Prompt", "Leelawadee UI", "Segoe UI", sans-serif;
+  --font-body: "Noto Sans Thai", "Leelawadee UI", "Segoe UI", sans-serif;
+  --label-size: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121726;
+    --surface: #1b2236;
+    --surface-2: #242d47;
+    --border: #36425f;
+    --ink: #f3f1ea;
+    --ink-2: #b3bace;
+    --brand: #5672b3;
+    --brand-text: #a9bdea;
+    --critical: #f08a7c;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.5;
+}
+h1, h2, p { margin: 0; }
+button, input, select { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 20px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border-bottom: 3px solid var(--brand);
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+/* The logo file has a white ground, so it sits on a white chip in both themes. */
+.logo { flex: none; width: auto; height: 60px; padding: 4px 6px; background: #fff; border-radius: 8px; }
+.app-name { font-family: var(--font-display); font-size: 17px; font-weight: 600; padding-left: 12px; border-left: 2px solid var(--border); }
+.app-name span { display: block; font-family: var(--font-body); font-size: 12px; font-weight: 400; color: var(--ink-2); }
+
+.locate { display: flex; flex-direction: column; gap: 8px; flex: 1 1 420px; min-width: 0; }
+#link-form { display: flex; gap: 8px; }
+#link-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 42px;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.locate-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.locate-actions button { font-size: 13.5px; min-height: 36px; padding: 6px 12px; }
+.reach { display: flex; align-items: center; gap: 8px; flex: 1 1 260px; min-width: 0; font-size: 13.5px; color: var(--ink-2); white-space: nowrap; }
+.reach select { flex: 1; min-width: 0; min-height: 36px; padding: 4px 8px; font-size: 13.5px; color: var(--ink); }
+#link-input:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 1px; }
+#status { flex-basis: 100%; min-height: 1.5em; font-size: 14px; color: var(--ink-2); }
+#status.error { color: var(--critical); }
+
+button {
+  min-height: 40px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.primary, button.active {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--on-brand);
+}
+button.primary { font-family: var(--font-display); font-weight: 600; }
+
+main {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 16px;
+  padding: 16px;
+}
+.sidebar { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.panel h2, .table-section h2 { font-family: var(--font-display); font-size: 15px; font-weight: 600; color: var(--brand-text); }
+.hint, .unit-note { font-size: 12.5px; color: var(--ink-2); }
+.field-label { font-size: 13px; color: var(--ink-2); }
+#flood-dir, #flood-level { display: flex; flex-direction: column; gap: 8px; }
+
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tile { display: flex; flex-direction: column; padding: 8px 10px; background: var(--surface-2); border-radius: 8px; }
+.tile-label { font-size: 12px; color: var(--ink-2); }
+.tile-value { font-family: var(--font-display); font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.segmented { display: flex; }
+.segmented button { flex: 1; border-radius: 0; margin-left: -1px; padding: 7px 4px; font-size: 13.5px; }
+.segmented button:first-child { border-radius: 8px 0 0 8px; margin-left: 0; }
+.segmented button:last-child { border-radius: 0 8px 8px 0; }
+
+.compass { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.compass button { padding: 8px 2px; font-size: 13px; }
+.compass-mid { display: grid; place-items: center; font-size: 12px; color: var(--ink-2); border: 1px dashed var(--border); border-radius: 8px; }
+.chips { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.chips button { padding: 6px 0; font-variant-numeric: tabular-nums; }
+#level-slider { width: 100%; accent-color: var(--brand); }
+select { min-height: 40px; padding: 8px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; width: 100%; }
+
+.legend-bar { height: 14px; border-radius: 4px; border: 1px solid var(--border); }
+.legend-scale { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.legend-item { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); margin-top: 6px; }
+.legend-swatch { flex: none; width: 18px; height: 14px; border-radius: 3px; border: 1px solid var(--border); }
+
+.map-wrap { min-height: 560px; min-width: 0; }
+#map { height: 100%; min-height: 560px; border: 1px solid var(--border); border-radius: 12px; z-index: 0; }
+#map.pin-mode { cursor: crosshair; }
+
+/* Numbers on the map: ink with a halo, never the cell color. */
+.cell-label {
+  display: grid;
+  place-items: center;
+  font-size: var(--label-size);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #22252c;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff, 0 0 4px #fff;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.labels-hidden .cell-label { display: none; }
+.flood-img { image-rendering: pixelated; }
+.ext-icon {
+  display: grid;
+  place-items: center;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  background: #22252c;
+  color: #fff;
+  font-size: 13px;
+  border: 2px solid #fff;
+}
+.leaflet-tooltip.ext-tip { font-weight: 600; font-variant-numeric: tabular-nums; }
+.leaflet-container { font-family: inherit; }
+
+.table-section { margin: 0 16px 16px; padding: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.table-scroll { overflow-x: auto; margin-top: 10px; }
+#grid-table { border-collapse: separate; border-spacing: 2px; font-variant-numeric: tabular-nums; font-size: 13.5px; }
+#grid-table th { font-weight: 500; font-size: 12px; color: var(--ink-2); padding: 4px 6px; white-space: nowrap; }
+#grid-table td { min-width: 52px; padding: 6px 4px; text-align: center; border-radius: 4px; }
+#grid-table td.center-cell { outline: 2px solid var(--ink); outline-offset: -2px; font-weight: 700; }
+
+footer { margin: 0 16px 24px; font-size: 12.5px; color: var(--ink-2); max-width: 1000px; }
+
+@media (max-width: 900px) {
+  main { grid-template-columns: minmax(0, 1fr); }
+  .map-wrap { order: -1; min-height: 0; }
+  /* Leave part of the page visible so a finger can still scroll past the map. */
+  #map { height: 62vh; min-height: 320px; }
+  .app-name span { display: none; }
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <img id="brand-logo" class="logo" alt="One Bio.farm" width="68" height="52">
+    <h1 class="app-name">TopoMap <span>ตารางระดับความสูงรอบจุดปัก</span></h1>
+  </div>
+  <div class="locate">
+    <form id="link-form">
+      <input id="link-input" type="text" autocomplete="off" spellcheck="false"
+             placeholder="ลิงก์ Google Maps, พิกัด หรือชื่อสถานที่"
+             aria-label="ลิงก์ Google Maps พิกัด หรือชื่อสถานที่">
+      <button type="submit" class="primary">วิเคราะห์</button>
+    </form>
+    <div class="locate-actions">
+      <button type="button" id="pin-btn" aria-pressed="false">ปักหมุดบนแผนที่</button>
+      <button type="button" id="gps-btn">ตำแหน่งของฉัน</button>
+      <label class="reach" for="reach-select">ระยะตาราง
+        <select id="reach-select"></select>
+      </label>
+    </div>
+  </div>
+  <div id="status" role="status" aria-live="polite"></div>
+</header>
+
+<main>
+  <aside class="sidebar">
+
+    <section class="panel">
+      <h2>สรุปพื้นที่</h2>
+      <div class="tiles" id="summary-tiles">
+        <div class="tile"><span class="tile-label">จุดปัก</span><span class="tile-value" id="t-center">–</span></div>
+        <div class="tile"><span class="tile-label">▼ ต่ำสุด</span><span class="tile-value" id="t-min">–</span></div>
+        <div class="tile"><span class="tile-label">▲ สูงสุด</span><span class="tile-value" id="t-max">–</span></div>
+        <div class="tile"><span class="tile-label">ต่างกัน</span><span class="tile-value" id="t-relief">–</span></div>
+      </div>
+      <p class="unit-note">หน่วย: เมตรจากระดับน้ำทะเลปานกลาง (ม.รทก.)</p>
+    </section>
+
+    <section class="panel">
+      <h2>ตัวเลขในตาราง</h2>
+      <div class="segmented" role="radiogroup" aria-label="ตัวเลขในตาราง">
+        <button type="button" data-label="elev" class="active">ความสูง</button>
+        <button type="button" data-label="diff">ต่างจากจุดปัก</button>
+        <button type="button" data-label="depth" disabled>น้ำลึก (ซม.)</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>จำลองน้ำ</h2>
+      <div class="segmented" role="radiogroup" aria-label="โหมดจำลองน้ำ">
+        <button type="button" data-flood="off" class="active">ปิด</button>
+        <button type="button" data-flood="dir">น้ำมาจากทิศ</button>
+        <button type="button" data-flood="level">ตั้งระดับเอง</button>
+      </div>
+
+      <div id="flood-dir" hidden>
+        <p class="field-label">น้ำไหลเข้ามาจากทิศ</p>
+        <div class="compass" role="radiogroup" aria-label="ทิศที่น้ำไหลเข้า">
+          <button type="button" data-dir="NW">ตต.เหนือ ↘</button>
+          <button type="button" data-dir="N" class="active">เหนือ ↓</button>
+          <button type="button" data-dir="NE">ตอ.เหนือ ↙</button>
+          <button type="button" data-dir="W">ตก →</button>
+          <span class="compass-mid">พื้นที่</span>
+          <button type="button" data-dir="E">ออก ←</button>
+          <button type="button" data-dir="SW">ตต.ใต้ ↗</button>
+          <button type="button" data-dir="S">ใต้ ↑</button>
+          <button type="button" data-dir="SE">ตอ.ใต้ ↖</button>
+        </div>
+        <p class="field-label">น้ำสูง (ซม.)</p>
+        <div class="chips" id="depth-chips" role="radiogroup" aria-label="ความสูงน้ำ"></div>
+        <p class="hint">น้ำสูงวัดจากระดับพื้นดินช่วงต่ำของขอบด้านที่น้ำเข้า (ตัดค่าหลังคา/ยอดไม้ออก) แล้วไหลต่อไปได้เฉพาะพื้นที่ต่ำกว่าผิวน้ำที่เชื่อมถึงกัน</p>
+      </div>
+
+      <div id="flood-level" hidden>
+        <p class="field-label">ระดับผิวน้ำ: <strong id="level-value">–</strong> ม.รทก.</p>
+        <input id="level-slider" type="range" step="0.1" aria-label="ระดับผิวน้ำ">
+        <p class="hint">แสดงทุกจุดที่ต่ำกว่าระดับนี้ (น้ำนิ่ง ไม่คิดทิศทาง)</p>
+      </div>
+
+      <div class="tiles" id="flood-tiles" hidden>
+        <div class="tile"><span class="tile-label">ระดับผิวน้ำ</span><span class="tile-value" id="f-level">–</span></div>
+        <div class="tile"><span class="tile-label">พื้นที่น้ำถึง</span><span class="tile-value" id="f-area">–</span></div>
+        <div class="tile"><span class="tile-label">ลึกที่จุดปัก</span><span class="tile-value" id="f-center">–</span></div>
+        <div class="tile"><span class="tile-label">ลึกสุด</span><span class="tile-value" id="f-max">–</span></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>คำอธิบายสี</h2>
+      <div id="legend"><p class="hint">จะแสดงเมื่อวิเคราะห์จุดแรกแล้ว</p></div>
+    </section>
+
+    <section class="panel">
+      <h2>แหล่งข้อมูล</h2>
+      <select id="source-select" aria-label="แหล่งข้อมูลความสูง">
+        <option value="glo30">Copernicus GLO-30 (ละเอียด 30 ม.) – แนะนำ</option>
+        <option value="openmeteo">Open-Meteo / GLO-90 (ละเอียด 90 ม., จำนวนเต็มเมตร)</option>
+      </select>
+      <p class="hint" id="source-note"></p>
+      <button type="button" id="csv-btn" disabled>ดาวน์โหลด CSV (เปิดใน Excel)</button>
+    </section>
+
+  </aside>
+
+  <section class="map-wrap">
+    <div id="map"></div>
+  </section>
+</main>
+
+<section class="table-section">
+  <h2 id="table-title">ตารางความสูง</h2>
+  <p class="hint" id="table-hint">แถวบน = ทิศเหนือ · หัวตาราง = ระยะจากจุดปัก (เมตร) · ช่องกรอบหนา = จุดปัก</p>
+  <div class="table-scroll"><table id="grid-table"></table></div>
+</section>
+
+<footer>
+  <p><strong>ข้อควรรู้เรื่องความแม่นยำ:</strong> Copernicus GLO-30 เป็นแบบจำลองความสูง<em>พื้นผิว</em>จากดาวเทียม (รวมหลังคาอาคารและยอดไม้) ช่องละ 30 เมตร ความคลาดเคลื่อนแนวดิ่งตามสเปกน้อยกว่า 4 เมตร (ที่ความเชื่อมั่น 90%) จึงเหมาะกับการดู<em>แนวโน้ม</em>ว่าตรงไหนสูง-ต่ำกว่ากัน ไม่ใช่ค่ารังวัด การจำลองน้ำระดับ 10–100 ซม. เป็นภาพประมาณเท่านั้น และไม่ได้คิดท่อระบายน้ำ กำแพง หรือคันกั้นน้ำ</p>
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js"></script>
+<script>
+'use strict';
+
+// ---------- constants ----------
+
+const N = 11;                // labelled grid points per side
+const MID = (N - 1) / 2;
+// Reach = metres from the pin to the outermost grid points. The cell size is always
+// reach / 5, so every reach gives an 11 x 11 table: 121 numbers stay readable on a
+// phone, while extremes and the flood model keep using the full-detail data.
+const REACH_OPTIONS = [500, 1000, 2000, 3000, 4000, 5000];
+const stepFor = (half) => half / MID;
+const POINT_STEP = 100;      // at this cell size a number is the grid point itself
+const DEPTHS_CM = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+const FLOOD_SCALE_M = 1;     // water depth that maps to the darkest blue
+
+// True when the page is served by server.ps1, which adds short-link resolving.
+const LOCAL_SERVER = location.protocol === 'http:' && /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+
+// fineStep = spacing of the denser grid used for the flood model and extremes,
+// given the cell size. It must divide the cell size an even number of times.
+const SOURCES = {
+  glo30: {
+    name: 'Copernicus GLO-30',
+    fineStep: () => 25,
+    decimals: 1,
+    note: 'ข้อมูลดาวเทียม ช่องละ 30 ม. ค่าทศนิยมจริง อ้างอิงระดับน้ำทะเลปานกลาง (EGM2008)',
+  },
+  openmeteo: {
+    name: 'Open-Meteo (Copernicus GLO-90)',
+    fineStep: (step) => step / 2, // keeps the request count small at any reach
+    decimals: 0,
+    note: 'ช่องละ 90 ม. และปัดเป็นจำนวนเต็มเมตร หยาบเกินไปสำหรับจำลองน้ำระดับเซนติเมตร ใช้เป็นตัวสำรอง',
+  },
+};
+
+const DIRECTIONS = {
+  N: 'เหนือ', NE: 'ตะวันออกเฉียงเหนือ', E: 'ตะวันออก', SE: 'ตะวันออกเฉียงใต้',
+  S: 'ใต้', SW: 'ตะวันตกเฉียงใต้', W: 'ตะวันตก', NW: 'ตะวันตกเฉียงเหนือ',
+};
+
+// Diverging: brand navy (lower than the pin) <-> gray (same) <-> earth red (higher).
+const RAMP_LOWER = ['#f0efec', '#c3cee6', '#8fa3d0', '#2f4e87', '#22325a'];
+const RAMP_HIGHER = ['#f0efec', '#f0cdbf', '#de9478', '#c2513a', '#8a2f1f'];
+// Sequential: water depth, shallow -> deep.
+const RAMP_DEPTH = ['#dfe6f4', '#a9b9dd', '#6f88c2', '#2f4e87', '#1d2b50'];
+const BLOCKED_RGB = [250, 178, 25]; // below the water level but walled off
+
+// ---------- state ----------
+
+const state = {
+  center: null,        // {lat, lng, note?}
+  source: 'glo30',
+  half: REACH_OPTIONS[0], // chosen reach; the analysed one lives in data.half
+  data: null,          // result of the last analysis
+  labelMode: 'elev',   // elev | diff | depth
+  floodMode: 'off',    // off | dir | level
+  floodDir: 'N',
+  floodDepthCm: 30,
+  floodLevel: null,    // m MSL, for 'level' mode
+  flood: null,         // result of computeFlood
+  pinMode: false,
+  runId: 0,
+};
+
+const $ = (id) => document.getElementById(id);
+
+// ---------- geometry ----------
+
+function metersPerDegree(lat) {
+  const p = lat * Math.PI / 180;
+  return {
+    lat: 111132.92 - 559.82 * Math.cos(2 * p) + 1.175 * Math.cos(4 * p),
+    lng: 111412.84 * Math.cos(p) - 93.5 * Math.cos(3 * p),
+  };
+}
+
+function offsetPoint(center, east, north) {
+  const m = metersPerDegree(center.lat);
+  return { lat: center.lat + north / m.lat, lng: center.lng + east / m.lng };
+}
+
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+// ---------- finding the place ----------
+
+function validCoord(lat, lng) {
+  return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
+    ? { lat, lng } : null;
+}
+
+function parseCoords(input) {
+  let s = input.trim();
+  try { s = decodeURIComponent(s); } catch { /* keep as typed */ }
+  s = s.replace(/\+/g, ' ');
+  const dec = '(-?\\d{1,3}\\.\\d+)';
+  const sep = '\\s*,\\s*';
+
+  // The pin of a place link; the last pair is the place itself.
+  const pins = [...s.matchAll(new RegExp('!3d' + dec + '!4d' + dec, 'g'))];
+  if (pins.length) {
+    const m = pins[pins.length - 1];
+    return validCoord(+m[1], +m[2]);
+  }
+  const patterns = [
+    new RegExp('[?&](?:q|query|ll|sll|center|destination|daddr)=(?:loc:)?\\s*' + dec + sep + dec),
+    new RegExp('/(?:search|place|dir)/\\s*' + dec + sep + dec),
+    new RegExp('@' + dec + ',' + dec),
+  ];
+  for (const re of patterns) {
+    const m = s.match(re);
+    if (m) return validCoord(+m[1], +m[2]);
+  }
+  const dms = s.match(/(\d{1,3})°\s*(\d{1,2})['′]\s*(\d{1,2}(?:\.\d+)?)["″]\s*([NS])[\s,]+(\d{1,3})°\s*(\d{1,2})['′]\s*(\d{1,2}(?:\.\d+)?)["″]\s*([EW])/i);
+  if (dms) {
+    const lat = (+dms[1] + dms[2] / 60 + dms[3] / 3600) * (dms[4].toUpperCase() === 'S' ? -1 : 1);
+    const lng = (+dms[5] + dms[6] / 60 + dms[7] / 3600) * (dms[8].toUpperCase() === 'W' ? -1 : 1);
+    return validCoord(lat, lng);
+  }
+  const plain = s.match(/^\s*\(?\s*(-?\d{1,3}(?:\.\d+)?)\s*[, ]\s*(-?\d{1,3}(?:\.\d+)?)\s*\)?\s*$/);
+  return plain ? validCoord(+plain[1], +plain[2]) : null;
+}
+
+// Short links hide the coordinates behind a redirect that a web page is not
+// allowed to follow, so the host has to do it: /api/resolve exists on the local
+// server (server.ps1) and on the website (deploy/api/resolve.js), not on a bare file.
+async function resolveLink(link) {
+  const unsupported = new Error('ลิงก์นี้ไม่มีพิกัดอยู่ในตัว (เช่น ลิงก์สั้น maps.app.goo.gl) และหน้านี้แกะเองไม่ได้ ให้พิมพ์ชื่อสถานที่ วางพิกัด หรือกด “ปักหมุดบนแผนที่” แทน');
+  if (location.protocol === 'file:') throw unsupported;
+  setStatus('กำลังแกะพิกัดจากลิงก์…');
+  let res, body;
+  try {
+    res = await fetch('/api/resolve?url=' + encodeURIComponent(link));
+    body = await res.json();
+  } catch {
+    throw unsupported; // no resolver on this host
+  }
+  if (res.status === 404) throw unsupported;
+  if (!res.ok) throw new Error('เปิดลิงก์ไม่สำเร็จ (' + (body.error || res.status) + ')');
+  const fromUrl = parseCoords(body.finalUrl);
+  if (fromUrl) return fromUrl;
+  const hint = body.hint && validCoord(body.hint.lat, body.hint.lng);
+  if (!hint) throw new Error('ไม่พบพิกัดในลิงก์นี้ ลองคลิกขวาที่จุดบน Google Maps แล้วคัดลอกพิกัดมาวางแทน');
+  // Taken from the map view of the page rather than an exact pin.
+  if (body.hint.approximate) hint.note = ' · พิกัดโดยประมาณจากมุมมองแผนที่ของลิงก์ กรุณาตรวจตำแหน่งหมุด (ลากหมุดเพื่อปรับได้)';
+  return hint;
+}
+
+// Place-name search on OpenStreetMap (Nominatim).
+async function searchPlace(query) {
+  setStatus('กำลังค้นหาสถานที่…');
+  const res = await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=th&q=' + encodeURIComponent(query));
+  if (!res.ok) throw new Error('ค้นหาสถานที่ไม่สำเร็จ (' + res.status + ')');
+  const hits = await res.json();
+  const found = hits.length && validCoord(+hits[0].lat, +hits[0].lon);
+  if (!found) throw new Error('ไม่พบสถานที่ชื่อนี้ ลองพิมพ์ให้ละเอียดขึ้น วางพิกัด หรือกด “ปักหมุดบนแผนที่”');
+  found.note = ` · พบ “${hits[0].display_name}” กรุณาตรวจตำแหน่งหมุด (ลากหมุดเพื่อปรับได้)`;
+  return found;
+}
+
+async function resolveInput(input) {
+  const text = input.trim();
+  const direct = parseCoords(text);
+  if (direct) return direct;
+  return /^https?:\/\//i.test(text) ? resolveLink(text) : searchPlace(text);
+}
+
+// ---------- elevation sources ----------
+
+// The fine grid covers the whole drawn table: half a cell beyond the outer grid
+// points (ext). Row 0 is the north edge.
+function fineGrid(half, step, fineStep) {
+  const ext = half + step / 2;
+  return { ext, step: fineStep, n: Math.round(2 * ext / fineStep) + 1 };
+}
+
+function finePoint(center, fine, i) {
+  const r = Math.floor(i / fine.n), c = i % fine.n;
+  return offsetPoint(center, -fine.ext + c * fine.step, fine.ext - r * fine.step);
+}
+
+// --- Copernicus GLO-30 GeoTIFF tiles, read with HTTP range requests ---
+
+const tileCache = new Map();
+
+function tileId(lat, lng) {
+  const ns = lat >= 0 ? 'N' : 'S';
+  const ew = lng >= 0 ? 'E' : 'W';
+  return `${ns}${String(Math.abs(lat)).padStart(2, '0')}_00_${ew}${String(Math.abs(lng)).padStart(3, '0')}_00_DEM`;
+}
+
+// OpenTopography's public copy allows direct browser access; the AWS copy does
+// not, so it is only reachable through the local server's proxy.
+function tileUrls(id) {
+  const urls = [`https://opentopography.s3.sdsc.edu/raster/COP30/COP30_hh/Copernicus_DSM_10_${id}.tif`];
+  if (LOCAL_SERVER) urls.push(`/api/dem/Copernicus_DSM_COG_10_${id}.tif`);
+  return urls;
+}
+
+// Resolves to a GeoTIFF image, or null where no tile exists (open sea).
+function openTile(id) {
+  if (!tileCache.has(id)) {
+    const pending = (async () => {
+      let lastError;
+      for (const url of tileUrls(id)) {
+        try {
+          const probe = await fetch(url, { headers: { Range: 'bytes=0-15' } });
+          if (probe.status === 404 || probe.status === 403) return null;
+          if (!probe.ok) throw new Error('HTTP ' + probe.status);
+          const tiff = await GeoTIFF.fromUrl(url);
+          return await tiff.getImage();
+        } catch (err) {
+          lastError = err;
+        }
+      }
+      throw new Error('โหลดข้อมูล Copernicus ไม่สำเร็จ (' + (lastError && lastError.message) + ')');
+    })();
+    pending.catch(() => tileCache.delete(id));
+    tileCache.set(id, pending);
+  }
+  return tileCache.get(id);
+}
+
+async function loadGlo30(center, half, step) {
+  const m = metersPerDegree(center.lat);
+  const fine = fineGrid(half, step, SOURCES.glo30.fineStep(step));
+  const pad = fine.ext + 90; // room for interpolation at the edges
+  const box = {
+    s: center.lat - pad / m.lat, n: center.lat + pad / m.lat,
+    w: center.lng - pad / m.lng, e: center.lng + pad / m.lng,
+  };
+  const windows = [];
+  for (let la = Math.floor(box.s - 0.001); la <= Math.floor(box.n + 0.001); la++) {
+    for (let lo = Math.floor(box.w - 0.001); lo <= Math.floor(box.e + 0.001); lo++) {
+      const image = await openTile(tileId(la, lo));
+      if (!image) continue;
+      const [ox, oy] = image.getOrigin();
+      const [rx, ryRaw] = image.getResolution();
+      const ry = Math.abs(ryRaw);
+      const W = image.getWidth(), H = image.getHeight();
+      const x0 = clamp(Math.floor((box.w - ox) / rx) - 1, 0, W);
+      const x1 = clamp(Math.ceil((box.e - ox) / rx) + 1, 0, W);
+      const y0 = clamp(Math.floor((oy - box.n) / ry) - 1, 0, H);
+      const y1 = clamp(Math.ceil((oy - box.s) / ry) + 1, 0, H);
+      if (x1 <= x0 || y1 <= y0) continue;
+      const [data] = await image.readRasters({ window: [x0, y0, x1, y1] });
+      windows.push({ ox, oy, rx, ry, W, H, x0, y0, w: x1 - x0, h: y1 - y0, data });
+    }
+  }
+
+  // Bilinear sample; sea (no tile) reads as 0.
+  const sample = (lat, lng) => {
+    for (const t of windows) {
+      const u = (lng - t.ox) / t.rx, v = (t.oy - lat) / t.ry;
+      if (u < 0 || u >= t.W || v < 0 || v >= t.H) continue;
+      const px = clamp(u - 0.5 - t.x0, 0, t.w - 1), py = clamp(v - 0.5 - t.y0, 0, t.h - 1);
+      const ix = Math.min(Math.floor(px), Math.max(t.w - 2, 0));
+      const iy = Math.min(Math.floor(py), Math.max(t.h - 2, 0));
+      const fx = px - ix, fy = py - iy;
+      const at = (x, y) => t.data[Math.min(y, t.h - 1) * t.w + Math.min(x, t.w - 1)];
+      return (at(ix, iy) * (1 - fx) + at(ix + 1, iy) * fx) * (1 - fy)
+           + (at(ix, iy + 1) * (1 - fx) + at(ix + 1, iy + 1) * fx) * fy;
+    }
+    return 0;
+  };
+
+  const data = new Float32Array(fine.n * fine.n);
+  for (let r = 0; r < fine.n; r++) {
+    const lat = center.lat + (fine.ext - r * fine.step) / m.lat;
+    for (let c = 0; c < fine.n; c++) {
+      data[r * fine.n + c] = sample(lat, center.lng + (-fine.ext + c * fine.step) / m.lng);
+    }
+  }
+
+  // Extremes come from the raw 30 m pixels inside the table, not only the grid points.
+  const extremes = { min: null, max: null };
+  for (const t of windows) {
+    for (let j = 0; j < t.h; j++) {
+      const lat = t.oy - (t.y0 + j + 0.5) * t.ry;
+      if (Math.abs(lat - center.lat) * m.lat > fine.ext) continue;
+      for (let i = 0; i < t.w; i++) {
+        const lng = t.ox + (t.x0 + i + 0.5) * t.rx;
+        if (Math.abs(lng - center.lng) * m.lng > fine.ext) continue;
+        const elev = t.data[j * t.w + i];
+        if (isNewExtreme(extremes, elev)) trackExtremes(extremes, { lat, lng, elev });
+      }
+    }
+  }
+  return { ...fine, data, extremes };
+}
+
+// --- Open-Meteo elevation API (100 points per call) ---
+
+async function loadOpenMeteo(center, half, step) {
+  const fine = fineGrid(half, step, SOURCES.openmeteo.fineStep(step));
+  const points = Array.from({ length: fine.n * fine.n }, (_, i) => finePoint(center, fine, i));
+  const data = new Float32Array(points.length);
+  for (let i = 0; i < points.length; i += 100) {
+    const chunk = points.slice(i, i + 100);
+    const url = 'https://api.open-meteo.com/v1/elevation'
+      + '?latitude=' + chunk.map((p) => p.lat.toFixed(6)).join(',')
+      + '&longitude=' + chunk.map((p) => p.lng.toFixed(6)).join(',');
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Open-Meteo ตอบกลับผิดพลาด (' + res.status + ')');
+    const body = await res.json();
+    data.set(body.elevation, i);
+  }
+  return { ...fine, data, extremes: { min: null, max: null } };
+}
+
+function isNewExtreme(extremes, elev) {
+  return Number.isFinite(elev)
+    && (!extremes.min || elev < extremes.min.elev || elev > extremes.max.elev);
+}
+
+function trackExtremes(extremes, p) {
+  if (!extremes.min || p.elev < extremes.min.elev) extremes.min = p;
+  if (!extremes.max || p.elev > extremes.max.elev) extremes.max = p;
+}
+
+// Fine-grid samples that stand for each labelled cell: the grid point alone for
+// 100 m cells, every sample inside the cell for larger ones.
+function cellSamples(fine, step) {
+  const k = step / fine.step;
+  const h = step === POINT_STEP ? 0 : k / 2;
+  const cells = [];
+  for (let r = 0; r < N; r++) {
+    for (let c = 0; c < N; c++) {
+      const fr = r * k + k / 2, fc = c * k + k / 2;
+      const samples = [];
+      for (let dr = -h; dr <= h; dr++) {
+        for (let dc = -h; dc <= h; dc++) samples.push((fr + dr) * fine.n + fc + dc);
+      }
+      cells.push(samples);
+    }
+  }
+  return cells;
+}
+
+// ---------- analysis ----------
+
+async function analyze() {
+  const runId = ++state.runId;
+  const center = state.center;
+  const half = state.half, step = stepFor(half);
+  let source = state.source;
+  setStatus(`กำลังดึงข้อมูลความสูงจาก ${SOURCES[source].name}…`);
+  $('csv-btn').disabled = true;
+
+  let fine, fallbackNote = '';
+  try {
+    fine = await (source === 'glo30' ? loadGlo30 : loadOpenMeteo)(center, half, step);
+  } catch (err) {
+    if (source !== 'glo30') throw err;
+    console.warn('GLO-30 failed, falling back to Open-Meteo', err);
+    source = 'openmeteo';
+    fine = await loadOpenMeteo(center, half, step);
+    fallbackNote = ' (โหลด Copernicus GLO-30 ไม่ได้ จึงใช้ Open-Meteo แทน)';
+  }
+  if (runId !== state.runId) return; // a newer request replaced this one
+
+  const cells = cellSamples(fine, step);
+  const grid = Float32Array.from(cells, (samples) => percentile(samples.map((i) => fine.data[i]), 0.5));
+  for (let i = 0; i < fine.data.length; i++) {
+    const elev = fine.data[i];
+    if (isNewExtreme(fine.extremes, elev)) trackExtremes(fine.extremes, { ...finePoint(center, fine, i), elev });
+  }
+
+  state.data = {
+    center, source, half, step, fine, grid, cells,
+    centerElev: grid[MID * N + MID],
+    min: fine.extremes.min,
+    max: fine.extremes.max,
+    fetchedAt: new Date(),
+  };
+  if (source !== state.source) {
+    state.source = source;
+    $('source-select').value = source;
+  }
+  $('source-note').textContent = SOURCES[source].note;
+  $('csv-btn').disabled = false;
+
+  setupLevelSlider();
+  buildMapLayers();
+  refresh();
+  setStatus(`พิกัด ${center.lat.toFixed(6)}, ${center.lng.toFixed(6)} · ${SOURCES[source].name}${fallbackNote}${center.note || ''}`);
+}
+
+// ---------- flood model ----------
+
+function entryCells(n, dir) {
+  const mid = (n - 1) / 2, last = n - 1;
+  const cells = [];
+  const north = (a, b) => { for (let c = a; c <= b; c++) cells.push(c); };
+  const south = (a, b) => { for (let c = a; c <= b; c++) cells.push(last * n + c); };
+  const west = (a, b) => { for (let r = a; r <= b; r++) cells.push(r * n); };
+  const east = (a, b) => { for (let r = a; r <= b; r++) cells.push(r * n + last); };
+  switch (dir) {
+    case 'N': north(0, last); break;
+    case 'S': south(0, last); break;
+    case 'W': west(0, last); break;
+    case 'E': east(0, last); break;
+    case 'NE': north(mid, last); east(0, mid); break;
+    case 'SE': south(mid, last); east(mid, last); break;
+    case 'SW': south(0, mid); west(mid, last); break;
+    case 'NW': north(0, mid); west(0, mid); break;
+  }
+  return cells;
+}
+
+function percentile(values, q) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const x = q * (sorted.length - 1);
+  const i = Math.floor(x);
+  return i + 1 < sorted.length ? sorted[i] + (sorted[i + 1] - sorted[i]) * (x - i) : sorted[i];
+}
+
+// Ground level of the edge the water enters from. The data is a surface model, so
+// roofs and treetops push values up; the lower quartile sits closer to real ground
+// than the median, without latching onto a single pond or canal pixel.
+const EDGE_GROUND_QUANTILE = 0.25;
+
+// Flat water surface. In 'dir' mode water starts on the chosen edge and only
+// reaches cells below the surface that connect back to that edge.
+function computeFlood() {
+  const d = state.data;
+  if (!d || state.floodMode === 'off') return null;
+  const { n, data } = d.fine;
+  const wet = new Uint8Array(n * n);
+  let level;
+
+  if (state.floodMode === 'level') {
+    level = state.floodLevel;
+    for (let i = 0; i < data.length; i++) wet[i] = data[i] < level ? 1 : 0;
+  } else {
+    const entry = entryCells(n, state.floodDir);
+    level = percentile(entry.map((i) => data[i]), EDGE_GROUND_QUANTILE) + state.floodDepthCm / 100;
+    const queue = [];
+    for (const i of entry) {
+      if (data[i] < level && !wet[i]) { wet[i] = 1; queue.push(i); }
+    }
+    while (queue.length) {
+      const i = queue.pop();
+      const r = Math.floor(i / n), c = i % n;
+      const neighbours = [r > 0 ? i - n : -1, r < n - 1 ? i + n : -1, c > 0 ? i - 1 : -1, c < n - 1 ? i + 1 : -1];
+      for (const j of neighbours) {
+        if (j >= 0 && !wet[j] && data[j] < level) { wet[j] = 1; queue.push(j); }
+      }
+    }
+  }
+
+  let wetCount = 0, maxDepth = 0;
+  for (let i = 0; i < data.length; i++) {
+    if (!wet[i]) continue;
+    wetCount++;
+    maxDepth = Math.max(maxDepth, level - data[i]);
+  }
+  // Typical depth per labelled cell: 0 unless most of the cell is under water.
+  const cellDepth = Float32Array.from(d.cells, (samples) =>
+    percentile(samples.map((i) => (wet[i] ? level - data[i] : 0)), 0.5));
+  return { level, wet, cellDepth, wetShare: wetCount / data.length, maxDepth };
+}
+
+// Depth in metres of a labelled cell (0 when dry).
+function gridDepth(r, c) {
+  return state.flood ? state.flood.cellDepth[r * N + c] : 0;
+}
+
+// ---------- colour ----------
+
+const hexToRgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+
+function rampColor(stops, t) {
+  const x = clamp(t, 0, 1) * (stops.length - 1);
+  const i = Math.min(Math.floor(x), stops.length - 2);
+  const a = hexToRgb(stops[i]), b = hexToRgb(stops[i + 1]);
+  return a.map((v, ch) => Math.round(v + (b[ch] - v) * (x - i)));
+}
+
+const rgbCss = (rgb, alpha = 1) => `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${alpha})`;
+
+// Symmetric range around the pin so equal differences get equal intensity. It spans
+// the numbers in the table, not the raw extremes: one tower or pit inside a wide
+// area would otherwise wash every cell out to the same pale tone.
+function diffRange() {
+  const d = state.data;
+  return d.grid.reduce((range, v) => Math.max(range, Math.abs(v - d.centerElev)), 0.5);
+}
+
+function elevationRgb(elev) {
+  const diff = elev - state.data.centerElev;
+  return rampColor(diff < 0 ? RAMP_LOWER : RAMP_HIGHER, Math.abs(diff) / diffRange());
+}
+
+const depthRgb = (depth) => rampColor(RAMP_DEPTH, depth / FLOOD_SCALE_M);
+
+function inkFor(rgb) {
+  const lum = (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
+  return lum < 0.5 ? '#ffffff' : '#22252c';
+}
+
+// ---------- formatting ----------
+
+function fmtElev(v) {
+  return v.toFixed(SOURCES[state.data.source].decimals);
+}
+
+const fmtDist = (m) => (m >= 1000 ? `${m / 1000} กม.` : `${m} ม.`);
+
+function fmtDiff(v) {
+  const s = v.toFixed(SOURCES[state.data.source].decimals);
+  return v > 0 && +s !== 0 ? '+' + s : s;
+}
+
+function cellText(r, c) {
+  const d = state.data;
+  const elev = d.grid[r * N + c];
+  if (state.labelMode === 'diff') return fmtDiff(elev - d.centerElev);
+  if (state.labelMode === 'depth') {
+    const depth = gridDepth(r, c);
+    return depth > 0 ? String(Math.max(1, Math.round(depth * 100))) : '–';
+  }
+  return fmtElev(elev);
+}
+
+function setStatus(text, isError = false) {
+  const el = $('status');
+  el.textContent = text;
+  el.classList.toggle('error', isError);
+}
+
+// ---------- map ----------
+
+const map = L.map('map', { zoomSnap: 0.25 }).setView([13.7563, 100.5018], 11);
+const streets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '&copy; OpenStreetMap contributors',
+}).addTo(map);
+const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 19,
+  maxNativeZoom: 18,
+  attribution: 'Tiles &copy; Esri',
+});
+L.control.layers({ 'แผนที่ถนน': streets, 'ภาพดาวเทียม': satellite }, null, { collapsed: false }).addTo(map);
+L.control.scale({ imperial: false }).addTo(map);
+// Wheel zoom only after clicking the map, so scrolling the page past it does not zoom.
+map.scrollWheelZoom.disable();
+map.on('mouseout', () => map.scrollWheelZoom.disable());
+map.on('click', (event) => {
+  map.scrollWheelZoom.enable();
+  if (!state.pinMode) return;
+  setPinMode(false);
+  placePin(event.latlng);
+});
+
+const layers = {
+  cells: L.layerGroup().addTo(map),
+  labels: L.layerGroup().addTo(map),
+  markers: L.layerGroup().addTo(map),
+  flood: null,
+  rects: [],
+  labelEls: [],
+};
+
+function buildMapLayers() {
+  const d = state.data;
+  layers.cells.clearLayers();
+  layers.labels.clearLayers();
+  layers.markers.clearLayers();
+  layers.rects = [];
+  layers.labelEls = [];
+
+  for (let r = 0; r < N; r++) {
+    for (let c = 0; c < N; c++) {
+      const east = -d.half + c * d.step, north = d.half - r * d.step;
+      const sw = offsetPoint(d.center, east - d.step / 2, north - d.step / 2);
+      const ne = offsetPoint(d.center, east + d.step / 2, north + d.step / 2);
+      const rect = L.rectangle([[sw.lat, sw.lng], [ne.lat, ne.lng]], { weight: 1, color: '#22252c', opacity: 0.25 });
+      rect.bindTooltip(() => cellTooltip(r, c), { sticky: true });
+      rect.addTo(layers.cells);
+      layers.rects.push(rect);
+
+      const p = offsetPoint(d.center, east, north);
+      const label = L.marker([p.lat, p.lng], {
+        interactive: false,
+        keyboard: false,
+        icon: L.divIcon({ className: 'cell-label', iconSize: [64, 20] }),
+      }).addTo(layers.labels);
+      layers.labelEls.push(label.getElement());
+    }
+  }
+
+  const pin = L.marker([d.center.lat, d.center.lng], { draggable: true, zIndexOffset: 1000 })
+    .bindTooltip('จุดปัก (ลากเพื่อย้าย)')
+    .addTo(layers.markers);
+  pin.on('dragend', () => placePin(pin.getLatLng()));
+
+  addExtremeMarker(d.max, '▲', 'สูงสุด');
+  addExtremeMarker(d.min, '▼', 'ต่ำสุด');
+
+  const sw = offsetPoint(d.center, -d.fine.ext, -d.fine.ext);
+  const ne = offsetPoint(d.center, d.fine.ext, d.fine.ext);
+  map.fitBounds([[sw.lat, sw.lng], [ne.lat, ne.lng]], { padding: [10, 10] });
+  updateLabelSize();
+}
+
+function addExtremeMarker(p, symbol, name) {
+  L.marker([p.lat, p.lng], {
+    icon: L.divIcon({ className: '', html: `<div class="ext-icon">${symbol}</div>`, iconSize: [24, 24], iconAnchor: [12, 12] }),
+    zIndexOffset: 900,
+  })
+    .bindTooltip(`${name} ${fmtElev(p.elev)} ม.`, { permanent: true, direction: 'right', offset: [12, 0], className: 'ext-tip' })
+    .addTo(layers.markers);
+}
+
+function cellTooltip(r, c) {
+  const d = state.data;
+  const elev = d.grid[r * N + c];
+  const p = offsetPoint(d.center, -d.half + c * d.step, d.half - r * d.step);
+  const lines = [
+    `<strong>${fmtElev(elev)} ม.รทก.</strong>${d.step === POINT_STEP ? '' : ' (ค่ากลางของช่อง)'}`,
+    `ต่างจากจุดปัก ${fmtDiff(elev - d.centerElev)} ม.`,
+  ];
+  if (state.flood) {
+    const depth = gridDepth(r, c);
+    lines.push(depth > 0 ? `น้ำลึกประมาณ ${Math.max(1, Math.round(depth * 100))} ซม.` : 'น้ำไม่ถึง');
+  }
+  lines.push(`${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`);
+  return lines.join('<br>');
+}
+
+// Scale the numbers with the on-screen cell size; hide them when cells get tiny.
+function updateLabelSize() {
+  if (!state.data) return;
+  const a = map.latLngToLayerPoint(offsetPoint(state.data.center, 0, 0));
+  const b = map.latLngToLayerPoint(offsetPoint(state.data.center, state.data.step, 0));
+  const cellPx = Math.abs(b.x - a.x);
+  const container = map.getContainer();
+  container.style.setProperty('--label-size', clamp(cellPx * 0.3, 9, 15) + 'px');
+  container.classList.toggle('labels-hidden', cellPx < 26);
+}
+map.on('zoomend', updateLabelSize);
+
+function renderMap() {
+  const d = state.data;
+  const flooding = !!state.flood;
+  layers.rects.forEach((rect, i) => {
+    rect.setStyle(flooding
+      ? { fillOpacity: 0 }
+      : { fillColor: rgbCss(elevationRgb(d.grid[i])), fillOpacity: 0.6 });
+  });
+  layers.labelEls.forEach((el, i) => { el.textContent = cellText(Math.floor(i / N), i % N); });
+
+  if (layers.flood) { map.removeLayer(layers.flood); layers.flood = null; }
+  if (flooding) {
+    const { n, step, ext, data } = d.fine;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = n;
+    const ctx = canvas.getContext('2d');
+    const img = ctx.createImageData(n, n);
+    for (let i = 0; i < data.length; i++) {
+      let rgb = null, alpha = 0;
+      if (state.flood.wet[i]) { rgb = depthRgb(state.flood.level - data[i]); alpha = 205; }
+      else if (data[i] < state.flood.level) { rgb = BLOCKED_RGB; alpha = 120; }
+      if (rgb) img.data.set([rgb[0], rgb[1], rgb[2], alpha], i * 4);
+    }
+    ctx.putImageData(img, 0, 0);
+    const sw = offsetPoint(d.center, -ext - step / 2, -ext - step / 2);
+    const ne = offsetPoint(d.center, ext + step / 2, ext + step / 2);
+    layers.flood = L.imageOverlay(canvas.toDataURL(), [[sw.lat, sw.lng], [ne.lat, ne.lng]], { className: 'flood-img' }).addTo(map);
+  }
+}
+
+// ---------- side panels ----------
+
+function renderSummary() {
+  const d = state.data;
+  $('t-center').textContent = fmtElev(d.centerElev) + ' ม.';
+  $('t-min').textContent = fmtElev(d.min.elev) + ' ม.';
+  $('t-max').textContent = fmtElev(d.max.elev) + ' ม.';
+  $('t-relief').textContent = fmtElev(d.max.elev - d.min.elev) + ' ม.';
+
+  const f = state.flood;
+  $('flood-tiles').hidden = !f;
+  if (f) {
+    const centerDepth = gridDepth(MID, MID);
+    $('f-level').textContent = f.level.toFixed(2) + ' ม.';
+    $('f-area').textContent = Math.round(f.wetShare * 100) + '%';
+    $('f-center').textContent = centerDepth > 0 ? Math.round(centerDepth * 100) + ' ซม.' : 'น้ำไม่ถึง';
+    $('f-max').textContent = Math.round(f.maxDepth * 100) + ' ซม.';
+  }
+}
+
+function gradientCss(stops) {
+  return `linear-gradient(to right, ${stops.join(', ')})`;
+}
+
+function renderLegend() {
+  const legend = $('legend');
+  if (state.flood) {
+    const blocked = state.floodMode === 'dir'
+      ? `<div class="legend-item"><span class="legend-swatch" style="background:${rgbCss(BLOCKED_RGB, 0.6)}"></span>ต่ำกว่าผิวน้ำ แต่มีที่สูงกั้นอยู่ (น้ำอาจเข้าทางท่อ/ล้นได้)</div>`
+      : '';
+    legend.innerHTML = `
+      <div class="legend-bar" style="background:${gradientCss(RAMP_DEPTH)}"></div>
+      <div class="legend-scale"><span>น้ำตื้น</span><span>50 ซม.</span><span>≥ 100 ซม.</span></div>
+      ${blocked}
+      <div class="legend-item"><span class="legend-swatch"></span>ไม่มีสี = น้ำไม่ถึง</div>`;
+  } else {
+    const range = fmtElev(diffRange());
+    legend.innerHTML = `
+      <div class="legend-bar" style="background:${gradientCss([...RAMP_LOWER].reverse().concat(RAMP_HIGHER.slice(1)))}"></div>
+      <div class="legend-scale"><span>ต่ำกว่า −${range} ม.</span><span>เท่าจุดปัก</span><span>สูงกว่า +${range} ม.</span></div>`;
+  }
+}
+
+function renderTable() {
+  const d = state.data;
+  const titles = { elev: 'ตารางความสูง (ม.รทก.)', diff: 'ตารางส่วนต่างจากจุดปัก (ม.)', depth: 'ตารางความลึกน้ำ (ซม.)' };
+  $('table-title').textContent = titles[state.labelMode];
+
+  $('table-hint').textContent = 'แถวบน = ทิศเหนือ · หัวตาราง = ระยะจากจุดปัก (เมตร) · ช่องกรอบหนา = จุดปัก'
+    + (d.step === POINT_STEP ? '' : ` · ตัวเลข = ค่ากลางของความสูงทั้งช่อง ${fmtDist(d.step)}`);
+
+  const axis = (v, neg, pos) => (v === 0 ? '0' : `${v < 0 ? neg : pos} ${Math.abs(v)}`);
+  let html = '<thead><tr><th></th>';
+  for (let c = 0; c < N; c++) html += `<th scope="col">${axis(-d.half + c * d.step, 'ตก', 'ออก')}</th>`;
+  html += '</tr></thead><tbody>';
+  for (let r = 0; r < N; r++) {
+    html += `<tr><th scope="row">${axis(d.half - r * d.step, 'ใต้', 'เหนือ')}</th>`;
+    for (let c = 0; c < N; c++) {
+      const elev = d.grid[r * N + c];
+      const depth = gridDepth(r, c);
+      let style = '';
+      if (!state.flood) {
+        const rgb = elevationRgb(elev);
+        style = `background:${rgbCss(rgb)};color:${inkFor(rgb)}`;
+      } else if (depth > 0) {
+        const rgb = depthRgb(depth);
+        style = `background:${rgbCss(rgb)};color:${inkFor(rgb)}`;
+      }
+      const cls = r === MID && c === MID ? ' class="center-cell"' : '';
+      html += `<td${cls} style="${style}">${cellText(r, c)}</td>`;
+    }
+    html += '</tr>';
+  }
+  $('grid-table').innerHTML = html + '</tbody>';
+}
+
+function refresh() {
+  if (!state.data) return;
+  state.flood = computeFlood();
+  const depthBtn = document.querySelector('[data-label="depth"]');
+  depthBtn.disabled = !state.flood;
+  if (!state.flood && state.labelMode === 'depth') setActive('[data-label]', 'label', state.labelMode = 'elev');
+  renderMap();
+  renderSummary();
+  renderLegend();
+  renderTable();
+}
+
+// ---------- CSV ----------
+
+function buildCsv() {
+  const d = state.data;
+  const f = state.flood;
+  const rows = [
+    ['TopoMap – One Bio.farm'],
+    ['จุดปัก (lat, lng)', d.center.lat.toFixed(6), d.center.lng.toFixed(6)],
+    ['แหล่งข้อมูล', SOURCES[d.source].name],
+    ['ระยะจากจุดปัก (ม.)', d.half],
+    ['ขนาดช่อง (ม.)', d.step],
+    ['ตัวเลขแต่ละช่อง', d.step === POINT_STEP ? 'ความสูง ณ จุดกลางช่อง' : 'ค่ากลางของความสูงทั้งช่อง'],
+    ['วันที่ดึงข้อมูล', d.fetchedAt.toLocaleString('th-TH')],
+    ['ความสูงจุดปัก (ม.รทก.)', fmtElev(d.centerElev)],
+    ['จุดต่ำสุด (ม.รทก., lat, lng)', fmtElev(d.min.elev), d.min.lat.toFixed(6), d.min.lng.toFixed(6)],
+    ['จุดสูงสุด (ม.รทก., lat, lng)', fmtElev(d.max.elev), d.max.lat.toFixed(6), d.max.lng.toFixed(6)],
+  ];
+  if (f) {
+    rows.push(['จำลองน้ำ', state.floodMode === 'dir'
+      ? `น้ำมาจากทิศ${DIRECTIONS[state.floodDir]} สูง ${state.floodDepthCm} ซม.`
+      : 'ตั้งระดับน้ำเอง']);
+    rows.push(['ระดับผิวน้ำ (ม.รทก.)', f.level.toFixed(2)]);
+  }
+
+  rows.push([], ['ตารางความสูง (ม.รทก.) แถวบน = ทิศเหนือ, หัวตาราง = ระยะจากจุดปัก (ม.) ตะวันออกเป็นบวก']);
+  const header = ['เหนือ(+)/ใต้(-) \\ ออก(+)/ตก(-)'];
+  for (let c = 0; c < N; c++) header.push(-d.half + c * d.step);
+  rows.push(header);
+  for (let r = 0; r < N; r++) {
+    const row = [d.half - r * d.step];
+    for (let c = 0; c < N; c++) row.push(fmtElev(d.grid[r * N + c]));
+    rows.push(row);
+  }
+
+  rows.push([], ['รายการจุด']);
+  const listHeader = ['ระยะตะวันออก (ม.)', 'ระยะเหนือ (ม.)', 'lat', 'lng', 'ความสูง (ม.รทก.)', 'ต่างจากจุดปัก (ม.)'];
+  if (f) listHeader.push('น้ำลึก (ซม.)');
+  rows.push(listHeader);
+  for (let r = 0; r < N; r++) {
+    for (let c = 0; c < N; c++) {
+      const east = -d.half + c * d.step, north = d.half - r * d.step;
+      const p = offsetPoint(d.center, east, north);
+      const elev = d.grid[r * N + c];
+      const row = [east, north, p.lat.toFixed(6), p.lng.toFixed(6), fmtElev(elev), fmtDiff(elev - d.centerElev)];
+      if (f) row.push(Math.round(gridDepth(r, c) * 100));
+      rows.push(row);
+    }
+  }
+
+  const escape = (v) => {
+    const s = String(v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  // BOM so Excel reads the Thai text as UTF-8.
+  return '﻿' + rows.map((row) => row.map(escape).join(',')).join('\r\n');
+}
+
+function downloadCsv() {
+  const d = state.data;
+  const blob = new Blob([buildCsv()], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `topomap_${d.center.lat.toFixed(5)}_${d.center.lng.toFixed(5)}.csv`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// ---------- controls ----------
+
+function setActive(selector, key, value) {
+  document.querySelectorAll(selector).forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset[key] === String(value));
+  });
+}
+
+function setupLevelSlider() {
+  const d = state.data;
+  const slider = $('level-slider');
+  slider.min = (Math.floor(d.min.elev * 10) / 10).toFixed(1);
+  slider.max = (Math.ceil(d.max.elev * 10) / 10 + 1).toFixed(1);
+  state.floodLevel = Math.round((d.centerElev + 0.3) * 10) / 10;
+  slider.value = state.floodLevel;
+  $('level-value').textContent = state.floodLevel.toFixed(1);
+}
+
+function setCenter(center) {
+  state.center = center;
+  analyze().catch((err) => {
+    console.error(err);
+    setStatus(err.message || String(err), true);
+  });
+}
+
+// A point chosen on the map itself (tap, drag or GPS).
+function placePin(latlng) {
+  $('link-input').value = `${latlng.lat.toFixed(6)}, ${latlng.lng.toFixed(6)}`;
+  setCenter({ lat: latlng.lat, lng: latlng.lng });
+}
+
+function setPinMode(on) {
+  state.pinMode = on;
+  $('pin-btn').classList.toggle('active', on);
+  $('pin-btn').setAttribute('aria-pressed', String(on));
+  map.getContainer().classList.toggle('pin-mode', on);
+  if (on) setStatus('แตะจุดที่ต้องการบนแผนที่เพื่อปักหมุด');
+}
+
+$('link-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const input = $('link-input').value;
+  if (!input.trim()) return;
+  try {
+    localStorage.setItem('topomap-last', input);
+  } catch { /* storage unavailable */ }
+  try {
+    setCenter(await resolveInput(input));
+  } catch (err) {
+    setStatus(err.message || String(err), true);
+  }
+});
+
+$('pin-btn').addEventListener('click', () => setPinMode(!state.pinMode));
+
+$('gps-btn').addEventListener('click', () => {
+  if (!navigator.geolocation) {
+    setStatus('เบราว์เซอร์นี้ไม่รองรับการอ่านตำแหน่ง', true);
+    return;
+  }
+  setStatus('กำลังอ่านตำแหน่งของคุณ…');
+  navigator.geolocation.getCurrentPosition(
+    (pos) => placePin({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+    () => setStatus('อ่านตำแหน่งไม่ได้ (ไม่ได้รับอนุญาต หรือเปิดหน้านี้จากไฟล์โดยตรง) ลองกด “ปักหมุดบนแผนที่” แทน', true),
+    { enableHighAccuracy: true, timeout: 15000 },
+  );
+});
+
+document.querySelectorAll('[data-label]').forEach((btn) => btn.addEventListener('click', () => {
+  state.labelMode = btn.dataset.label;
+  setActive('[data-label]', 'label', state.labelMode);
+  refresh();
+}));
+
+document.querySelectorAll('[data-flood]').forEach((btn) => btn.addEventListener('click', () => {
+  state.floodMode = btn.dataset.flood;
+  setActive('[data-flood]', 'flood', state.floodMode);
+  $('flood-dir').hidden = state.floodMode !== 'dir';
+  $('flood-level').hidden = state.floodMode !== 'level';
+  refresh();
+}));
+
+document.querySelectorAll('[data-dir]').forEach((btn) => btn.addEventListener('click', () => {
+  state.floodDir = btn.dataset.dir;
+  setActive('[data-dir]', 'dir', state.floodDir);
+  refresh();
+}));
+
+for (const cm of DEPTHS_CM) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.dataset.depth = cm;
+  btn.textContent = cm;
+  btn.addEventListener('click', () => {
+    state.floodDepthCm = cm;
+    setActive('[data-depth]', 'depth', cm);
+    refresh();
+  });
+  $('depth-chips').append(btn);
+}
+setActive('[data-depth]', 'depth', state.floodDepthCm);
+
+$('level-slider').addEventListener('input', (event) => {
+  state.floodLevel = +event.target.value;
+  $('level-value').textContent = state.floodLevel.toFixed(1);
+  refresh();
+});
+
+$('source-select').addEventListener('change', (event) => {
+  state.source = event.target.value;
+  if (state.center) setCenter(state.center);
+});
+
+for (const half of REACH_OPTIONS) {
+  const side = 2 * half / 1000;
+  $('reach-select').add(new Option(`${fmtDist(half)} รอบจุด · ช่องละ ${fmtDist(stepFor(half))} (พื้นที่ ${side}×${side} กม.)`, half));
+}
+try {
+  const saved = +localStorage.getItem('topomap-reach');
+  if (REACH_OPTIONS.includes(saved)) state.half = saved;
+} catch { /* storage unavailable */ }
+$('reach-select').value = state.half;
+$('reach-select').addEventListener('change', (event) => {
+  state.half = +event.target.value;
+  try {
+    localStorage.setItem('topomap-reach', state.half);
+  } catch { /* storage unavailable */ }
+  if (state.center) setCenter(state.center);
+});
+
+$('csv-btn').addEventListener('click', downloadCsv);
+
+try {
+  const last = localStorage.getItem('topomap-last');
+  if (last) $('link-input').value = last;
+} catch { /* storage unavailable */ }
+setStatus('วางลิงก์ Google Maps พิกัด หรือพิมพ์ชื่อสถานที่ แล้วกด “วิเคราะห์” · หรือกด “ปักหมุดบนแผนที่”');
+</script>
+<!-- Logo (LOGO OBF.png, scaled down) embedded so the app stays a single file. -->
+<script>document.getElementById('brand-logo').src = 'data:image/png;base64,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';</script>
+</body>
+</html>
